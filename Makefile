@@ -65,7 +65,7 @@ govet:
 ifneq ($(HAS_SERVER),)
 	@echo Running govet
 	@# Workaround because you can't install binaries without adding them to go.mod
-	env GO111MODULE=off $(GO) get golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
+	env GO111MODULE=on $(GO) get golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
 	$(GO) vet ./...
 	$(GO) vet -vettool=$(GOPATH)/bin/shadow ./...
 	@echo Govet success
@@ -75,7 +75,7 @@ endif
 .PHONY: golint
 golint:
 	@echo Running lint
-	env GO111MODULE=off $(GO) get golang.org/x/lint/golint
+	env GO111MODULE=on $(GO) get golang.org/x/lint/golint
 	$(GOPATH)/bin/golint -set_exit_status ./...
 	@echo lint success
 

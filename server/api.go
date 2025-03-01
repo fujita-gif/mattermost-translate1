@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/translate"
+	"github.com/mattermost/mattermost-server/v5/model"
 )
 
 // APIErrorResponse as standard response error
@@ -46,6 +47,31 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	}
 }
 
+func (p *Plugin) translateText(text, sourceLang, targetLang string) (string, *model.AppError) {
+	configuration := p.getConfiguration()
+	sess := session.Must(session.NewSession())
+	creds := credentials.NewStaticCredentials(configuration.AWSAccessKeyID, configuration.AWSSecretAccessKey, "")
+	_, awsErr := creds.Get()
+	if awsErr != nil {
+		return "", model.NewAppError("translateText", "BadCredentials", nil, "Invalid AWS credentials", http.StatusForbidden)
+	}
+
+	svc := translate.New(sess, aws.NewConfig().WithCredentials(creds).WithRegion(configuration.AWSRegion))
+
+	input := translate.TextInput{
+		SourceLanguageCode: &sourceLang,
+		TargetLanguageCode: &targetLang,
+		Text:               &text,
+	}
+
+	output, awsErr := svc.Text(&input)
+	if awsErr != nil {
+		return "", model.NewAppError("translateText", "TranslationFailed", nil, "Translation API error", http.StatusInternalServerError)
+	}
+
+	return *output.TranslatedText, nil
+}
+
 func (p *Plugin) getGo(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("Mattermost-User-ID")
 	if userID == "" {
@@ -54,22 +80,8 @@ func (p *Plugin) getGo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	postID := r.URL.Query().Get("post_id")
-	if len(postID) != 26 {
-		http.Error(w, "Invalid parameter: post_id", http.StatusBadRequest)
-		return
-	}
-
 	source := r.URL.Query().Get("source")
-	if len(source) < 2 || len(source) > 5 {
-		http.Error(w, "Invalid parameter: source", http.StatusBadRequest)
-		return
-	}
-
 	target := r.URL.Query().Get("target")
-	if len(target) < 2 || len(target) > 5 {
-		http.Error(w, "Invalid parameter: target", http.StatusBadRequest)
-		return
-	}
 
 	post, err := p.API.GetPost(postID)
 	if err != nil {
@@ -77,26 +89,19 @@ func (p *Plugin) getGo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	configuration := p.getConfiguration()
-	sess := session.Must(session.NewSession())
-	creds := credentials.NewStaticCredentials(configuration.AWSAccessKeyID, configuration.AWSSecretAccessKey, "")
-	_, awsErr := creds.Get()
-	if awsErr != nil {
-		http.Error(w, "Bad credentials", http.StatusForbidden)
-		return
+	// 🔹 言語が "auto" の場合は自動検出
+	if source == "auto" {
+		detected, err := p.detectLanguage(post.Message)
+		if err != nil {
+			http.Error(w, "Language detection failed", http.StatusBadRequest)
+			return
+		}
+		source = detected
 	}
 
-	svc := translate.New(sess, aws.NewConfig().WithCredentials(creds).WithRegion(configuration.AWSRegion))
-
-	input := translate.TextInput{
-		SourceLanguageCode: &source,
-		TargetLanguageCode: &target,
-		Text:               &post.Message,
-	}
-
-	output, awsErr := svc.Text(&input)
-	if awsErr != nil {
-		http.Error(w, awsErr.Error(), http.StatusBadRequest)
+	translatedText, err := p.translateText(post.Message, source, target)
+	if err != nil {
+		http.Error(w, "Translation failed", http.StatusBadRequest)
 		return
 	}
 
@@ -106,7 +111,7 @@ func (p *Plugin) getGo(w http.ResponseWriter, r *http.Request) {
 		SourceLanguage: source,
 		SourceText:     post.Message,
 		TargetLanguage: target,
-		TranslatedText: *output.TranslatedText,
+		TranslatedText: translatedText,
 		UpdateAt:       post.UpdateAt,
 	}
 

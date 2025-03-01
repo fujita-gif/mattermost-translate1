@@ -8,6 +8,11 @@ import (
 
 	"github.com/mattermost/mattermost-server/v5/model"
 	"github.com/mattermost/mattermost-server/v5/plugin"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/comprehend"
 )
 
 const (
@@ -139,4 +144,68 @@ func (p *Plugin) emitUserInfoChange(userInfo *UserInfo) {
 		},
 		&model.WebsocketBroadcast{UserId: userInfo.UserID},
 	)
+}
+
+func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*model.Post, string) {
+	userID := post.UserId
+	userInfo, _ := p.getUserInfo(userID)
+	if userInfo == nil || !userInfo.Activated {
+		return post, ""
+	}
+
+	sourceLang := userInfo.SourceLanguage
+	targetLang := userInfo.TargetLanguage
+
+	// 自動検出の場合、翻訳エンジンの言語検出機能を使う（仮の関数 detectLanguage）
+	if sourceLang == autoLanguage {
+		detectedLang, err := p.detectLanguage(post.Message) // 言語検出関数（要実装）
+		if err != nil {
+			return post, "Failed to detect language"
+		}
+		sourceLang = detectedLang
+	}
+
+	// 同じ言語なら翻訳しない
+	if sourceLang == targetLang {
+		return post, ""
+	}
+
+	translatedText, err := p.translateText(post.Message, sourceLang, targetLang)
+	if err != nil {
+		return post, "Failed to translate message"
+	}
+
+	// 翻訳後のメッセージが元のメッセージと同じなら追加しない
+	if translatedText == post.Message {
+		return post, ""
+	}
+
+	// 翻訳結果を追加
+	post.Message = fmt.Sprintf("%s\n\n(Translated: %s → %s)\n%s", post.Message, sourceLang, targetLang, translatedText)
+
+	return post, ""
+}
+
+func (p *Plugin) detectLanguage(text string) (string, error) {
+	configuration := p.getConfiguration()
+	sess := session.Must(session.NewSession())
+	creds := credentials.NewStaticCredentials(configuration.AWSAccessKeyID, configuration.AWSSecretAccessKey, "")
+	_, awsErr := creds.Get()
+	if awsErr != nil {
+		return "", fmt.Errorf("Invalid AWS credentials")
+	}
+
+	svc := comprehend.New(sess, aws.NewConfig().WithCredentials(creds).WithRegion(configuration.AWSRegion))
+
+	input := &comprehend.DetectDominantLanguageInput{
+		Text: aws.String(text),
+	}
+
+	result, err := svc.DetectDominantLanguage(input)
+	if err != nil || len(result.Languages) == 0 {
+		return "", fmt.Errorf("Failed to detect language")
+	}
+
+	language := *result.Languages[0].LanguageCode
+	return language, nil
 }

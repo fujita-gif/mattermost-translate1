@@ -17,7 +17,7 @@ const (
 	autoLanguage      = "auto"
 )
 
-const commandHelp = `
+const autotranslateHelp = `
 This plugin is powered by Amazon Translate which is a text translation service that uses advanced machine learning technologies to provide high-quality translation on demand. Amazon Translate can translate text between the languages listed in its [website](https://docs.aws.amazon.com/translate/latest/dg/what-is.html).
 
 * |/autotranslate on| - Add an option to translate a post with the default setting of Auto as source and English as target.
@@ -29,6 +29,19 @@ This plugin is powered by Amazon Translate which is a text translation service t
   * |value| can be any of the [supported language codes](https://docs.aws.amazon.com/translate/latest/dg/what-is.html).
 * |Language codes|: See [AWS Translate supported languages](https://docs.aws.amazon.com/translate/latest/dg/what-is.html)
   `
+
+const translateHelp = `
+  This plugin is powered by Amazon Translate which is a text translation service that uses advanced machine learning technologies to provide high-quality translation on demand. Amazon Translate can translate text between the languages listed in its [website](https://docs.aws.amazon.com/translate/latest/dg/what-is.html).
+  
+  * |/translate on| - Add an option to translate an input message with the default setting of Auto as source and English as target.
+  * |/translate off| - Remove an option to translate an input message
+  * |/translate info| - Show user info on this plugin
+  * |/translate source [value]| - Update your translation source
+	* |value| can be any of the [supported language codes](https://docs.aws.amazon.com/translate/latest/dg/what-is.html) or "auto" to automatically detect language used.
+  * |/translate target [value]| - Update your translation target
+	* |value| can be any of the [supported language codes](https://docs.aws.amazon.com/translate/latest/dg/what-is.html).
+  * |Language codes|: See [AWS Translate supported languages](https://docs.aws.amazon.com/translate/latest/dg/what-is.html)
+	`
 
 // See https://docs.aws.amazon.com/translate/latest/dg/what-is.html for updated supported languages.
 // Below is hard-coded but would be nice if AWS SDK supports getting the list programmatically
@@ -123,6 +136,17 @@ func (p *Plugin) registerCommands() error {
 		return errors.Wrap(err, "failed to register autotranslate command")
 	}
 
+	// 新しいtranslateコマンドの登録
+	if err := p.API.RegisterCommand(&model.Command{
+		Trigger:          "translate",
+		DisplayName:      "Translate",
+		Description:      "Mattermost Translate Plugin",
+		AutoComplete:     true,
+		AutoCompleteDesc: "Available commands: on, off, help",
+		AutoCompleteHint: "[command]",
+	}); err != nil {
+		return errors.Wrap(err, "failed to register translate command")
+	}
 	return nil
 }
 
@@ -184,13 +208,18 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		param = split[2]
 	}
 
-	if command != "/autotranslate" {
+	if command != "/autotranslate" && command != "/translate" {
 		return nil, nil
 	}
 
 	var text = ""
 	if action == "" || action == "help" {
-		text = "###### Mattermost Autotranslate Plugin - Slash Command Help\n" + strings.Replace(commandHelp, "|", "`", -1)
+		// コマンドに応じてヘルプメッセージを切り替える
+		if command == "/autotranslate" {
+			text = "###### Mattermost Autotranslate Plugin - Slash Command Help\n" + strings.Replace(autotranslateHelp, "|", "`", -1)
+		} else if command == "/translate" {
+			text = "###### Mattermost Translate Plugin - Slash Command Help\n" + strings.Replace(translateHelp, "|", "`", -1)
+		}
 		return getCommandResponse(model.COMMAND_RESPONSE_TYPE_EPHEMERAL, text), nil
 	}
 
@@ -261,7 +290,22 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		err = p.setUserInfo(userInfo)
 		return setUserInfoCommandResponse(userInfo, err, action)
 	default:
-		text = "###### Mattermost Autotranslate Plugin - Slash Command Help\n" + strings.Replace(commandHelp, "|", "`", -1)
+		if command == "/translate" && action != "" {
+			sourceLang := userInfo.SourceLanguage
+			targetLang := userInfo.TargetLanguage
+			translatedText, err := p.translateText(action, sourceLang, targetLang)
+			if err != nil {
+				return getCommandResponse(model.COMMAND_RESPONSE_TYPE_EPHEMERAL, "Failed to translate message."), nil
+			}
+			responseText := fmt.Sprintf("Translated (%s → %s):\n> %s", sourceLang, targetLang, translatedText)
+			return getCommandResponse(model.COMMAND_RESPONSE_TYPE_EPHEMERAL, responseText), nil
+		}
+		if command == "/autotranslate" {
+			text = "###### Mattermost Autotranslate Plugin - Slash Command Help\n" + strings.Replace(autotranslateHelp, "|", "`", -1)
+		}
+		if command == "/translate" {
+			text = "###### Mattermost Autotranslate Plugin - Slash Command Help\n" + strings.Replace(translateHelp, "|", "`", -1)
+		}
 		return getCommandResponse(model.COMMAND_RESPONSE_TYPE_EPHEMERAL, text), nil
 	}
 }
