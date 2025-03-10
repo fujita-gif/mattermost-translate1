@@ -297,7 +297,19 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 			if err != nil {
 				return getCommandResponse(model.COMMAND_RESPONSE_TYPE_EPHEMERAL, "Failed to translate message."), nil
 			}
-			responseText := fmt.Sprintf("Translated (%s → %s):\n> %s", sourceLang, targetLang, translatedText)
+
+			// 言語コードを言語名に変換
+			sourceLangName, sourceExists := languageCodes[sourceLang]
+			if !sourceExists {
+				sourceLangName = sourceLang // 言語名がない場合はコードのまま
+			}
+
+			targetLangName, targetExists := languageCodes[targetLang]
+			if !targetExists {
+				targetLangName = targetLang // 言語名がない場合はコードのまま
+			}
+
+			responseText := fmt.Sprintf("Translated (%s → %s):\n> %s", sourceLangName, targetLangName, translatedText)
 			return getCommandResponse(model.COMMAND_RESPONSE_TYPE_EPHEMERAL, responseText), nil
 		}
 		if command == "/autotranslate" {

@@ -180,8 +180,19 @@ func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*mode
 		return post, ""
 	}
 
+	// 言語コードを言語名に変換
+	sourceLangName, sourceExists := languageCodes[sourceLang]
+	if !sourceExists {
+		sourceLangName = sourceLang // 言語名がない場合はコードのまま
+	}
+
+	targetLangName, targetExists := languageCodes[targetLang]
+	if !targetExists {
+		targetLangName = targetLang // 言語名がない場合はコードのまま
+	}
+
 	// 翻訳結果を追加
-	post.Message = fmt.Sprintf("%s\n\n(Translated: %s → %s)\n%s", post.Message, sourceLang, targetLang, translatedText)
+	post.Message = fmt.Sprintf("%s\n\n(Translated: %s → %s)\n%s", post.Message, sourceLangName, targetLangName, translatedText)
 
 	return post, ""
 }
